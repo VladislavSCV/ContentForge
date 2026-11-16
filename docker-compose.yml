@@ -1,0 +1,9 @@
+services:
+  contentops:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/srv/data                          # SQLite + сгенерированные mp3/mp4
+      - ./assets/backgrounds:/srv/assets/backgrounds  # фоны для Shorts можно докидывать без пересборки
+      - ./assets/fonts:/srv/assets/fonts

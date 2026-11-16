@@ -1,0 +1,18 @@
+# Один инстанс на команду: INSTANCE=psy docker compose -p cf-psy -f docker-compose.instance.yml up -d --build
+# (удобнее через scripts/instance.sh). Настройки, данные и ассеты команды лежат в instances/<команда>/.
+# Прежний docker-compose.yml (один инстанс автора) не менялся.
+services:
+  contentops:
+    build: .
+    image: contentforge:local                     # образ общий: сборка один раз на все инстансы
+    restart: unless-stopped
+    env_file: instances/${INSTANCE:?задай INSTANCE=<имя папки в instances/>}/.env
+    environment:
+      # пути внутри контейнера фиксированы; в .env команды их задавать не нужно
+      DATA_DIR: /srv/data
+      BACKGROUNDS_DIR: /srv/instance/backgrounds
+      MASCOT_DIR: /srv/instance/mascot            # пустая папка = ролики команды без маскота (маскот автора из образа не используется)
+      PRONUNCIATION_FILE: /srv/instance/pronunciation.txt
+    volumes:
+      - ./instances/${INSTANCE}/data:/srv/data    # SQLite и сгенерированные аудио/видео этой команды
+      - ./instances/${INSTANCE}:/srv/instance:ro  # фоны, маскот, произношение

@@ -1,0 +1,44 @@
+# Профиль general: познавательное медиа про психологию, науку, кризисы и общество.
+# Всё, чего здесь нет (промпты, флаги), берётся из engineering. Копируй эту папку, чтобы завести новую команду.
+extends = "engineering"
+description = "Психология, наука, кризисы и общество для широкой аудитории"
+sources_file = "assets/sources_general.txt"
+stock_fallback = ["city night lights", "rain on window night", "dark abstract particles"]
+
+[flags]
+story_shorts = false
+claim_layout = false
+flow_layout = false
+rubrics = false
+code_warning = false
+code_scene = false
+
+# Столпов и рубрик у профиля нет: пустые таблицы заменяют унаследованные.
+[pillars]
+[rubrics]
+[pillar_patterns]
+
+[[themes]]
+label = "психология и исследования"
+weight = 3
+pattern = 'new study|study (finds|shows|suggests)|researchers? (found|discover|show)|experiment|neuroscien|\bbrain\b|cognitive|psycholog|behaviou?r|\bbias(es)?\b|memory|sleep|attention|habit'
+
+[[themes]]
+label = "стресс и эмоции"
+weight = 3
+pattern = 'stress|anxiety|burnout|trauma|loneliness|resilien|mental health|motivation|decision.?making|emotion'
+
+[[themes]]
+label = "кризисы и общество"
+weight = 2
+pattern = 'crisis|collapse|disaster|pandemic|recession|inflation|shortage|famine|\bwars?\b|sanctions|climate|extinction'
+
+[[themes]]
+label = "наука и вселенная"
+weight = 2
+pattern = 'physics|quantum|astronom|universe|black hole|evolution|genetic|\bdna\b|ancient|archaeolog|fossil|mathemat|paradox|illusion'
+
+[[themes]]
+label = "работа и экономика"
+weight = 1
+pattern = 'economy|productivity|remote work|workplace|leadership|negotiation|persuasion'

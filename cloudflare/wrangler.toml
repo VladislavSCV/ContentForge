@@ -1,0 +1,12 @@
+# Cloudflare Worker: Telegram Bot API + YouTube upload + LinkedIn for a server in Russia.
+# Dashboard deploys do not need this file. CLI: cd cloudflare && npx wrangler deploy
+# `name` must match the worker in the dashboard, otherwise a second worker is created.
+# PROXY_SECRET is a secret, not a var: npx wrangler secret put PROXY_SECRET
+name = "white-fog-8460"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+[vars]
+# Digits before ":" in the bot token, comma-separated.
+ALLOWED_BOT_ID = ""

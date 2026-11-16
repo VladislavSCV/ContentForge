@@ -1,0 +1,850 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>ContentOps composition</title>
+<style>
+  /* Шрифт и конфиг подставляются из Python (engine.py) */
+  @font-face {
+    font-family: "Display";
+    src: url(__FONT_SANS__) format("truetype");
+    font-weight: 100 900;
+    font-style: normal;
+  }
+  @font-face {
+    font-family: "Mono";
+    src: url(__FONT_MONO__) format("truetype");
+    font-weight: 100 900;
+    font-style: normal;
+  }
+
+  :root {
+    --ink: #ffffff;
+    --ink-2: rgba(255, 255, 255, 0.60);
+    --ink-3: rgba(255, 255, 255, 0.38);
+    --accent: #ffc533;
+    --warn: #ff6961;
+    --stroke: rgba(255, 255, 255, 0.11);
+    --card: rgba(255, 255, 255, 0.055);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 1080px; height: 1920px;
+    background: transparent;          /* фон-видео подкладывает ffmpeg */
+    overflow: hidden;
+    font-family: "Display", system-ui, sans-serif;
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: geometricPrecision;
+  }
+
+  #stage { position: absolute; inset: 0; }
+
+  /* ---------- фон: затемняющая подложка поверх стокового видео ---------- */
+  /* Тёмная подложка поверх стокового видео. Без неё текст тонет на светлых кадрах,
+     а фон должен читаться как фактура, а не как самостоятельная картинка. */
+  #wash {
+    position: absolute; inset: 0;
+    background: linear-gradient(180deg,
+      rgba(4,6,9,.90) 0%, rgba(4,6,9,.80) 30%, rgba(4,6,9,.84) 62%, rgba(4,6,9,.94) 100%);
+  }
+  #vignette {
+    position: absolute; inset: 0;
+    background: radial-gradient(circle at 50% 42%, transparent 38%, rgba(0,0,0,.58) 100%);
+  }
+  /* мягкие пятна рисуем градиентом, а не filter: blur() — без GPU размытие пересчитывается
+     каждый кадр и съедает почти всё время рендера */
+  .blob { position: absolute; border-radius: 50%; }
+  /* без стокового видео фон не должен быть просто чёрным: тихий «дождь из символов» держит кадр живым.
+     Яркость минимальная, чтобы не спорить с текстом; сверху и снизу гаснет, где живут шапка и субтитры. */
+  #ambient {
+    position: absolute; inset: 0; overflow: hidden;
+    -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 22%, #000 70%, transparent 100%);
+    mask-image: linear-gradient(180deg, transparent 0%, #000 22%, #000 70%, transparent 100%);
+  }
+  .rain { position: absolute; top: 0; white-space: pre; font: 600 30px/38px "Mono", monospace; }
+
+  /* ---------- постоянные элементы ---------- */
+  #progress-track { display: none; }
+  #progress-track-old {
+    position: absolute; top: 0; left: 0; width: 1080px; height: 5px;
+    background: rgba(255,255,255,.10);
+  }
+  #progress-fill {
+    position: absolute; top: 0; left: 0; height: 5px; width: 0;
+    background: var(--accent);
+    box-shadow: 0 0 18px rgba(255,197,51,.55);
+  }
+  #brand {
+    position: absolute; top: 74px; left: 72px;
+    display: flex; align-items: center; gap: 16px;
+  }
+  #brand-dot {
+    width: 11px; height: 11px; border-radius: 50%;
+    background: rgba(255,255,255,.55);
+  }
+  #brand-name {
+    font-size: 24px; font-weight: 600; letter-spacing: .2em;
+    text-transform: uppercase; color: rgba(255,255,255,.5);
+  }
+
+  /* ---------- сцены ---------- */
+  .scene {
+    position: absolute; left: 72px; right: 72px;
+    top: 196px; height: 1070px;
+    display: flex; flex-direction: column; justify-content: center;
+    will-change: opacity, transform;
+  }
+  /* в сцене решения контента больше всех — прижимаем к верху, чтобы терминал не уезжал под субтитры */
+  #scene-solution { justify-content: center; }
+
+  /* хук */
+  #hook-big {
+    font-weight: 900; letter-spacing: -.035em; line-height: .96;
+    font-size: 290px; text-align: center;
+    text-shadow: 0 16px 60px rgba(0,0,0,.55);
+  }
+  #hook-big .num {
+    background: linear-gradient(180deg, #ffffff 25%, #ffd36b 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  #hook-small {
+    margin-top: 42px; text-align: center;
+    font-size: 58px; font-weight: 500; line-height: 1.22; color: var(--ink-2);
+  }
+
+  /* хук-спор: миф зачёркивается, под ним появляется правда */
+  .claim-tag {
+    font-size: 40px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase;
+    color: rgba(255,255,255,.5); margin-bottom: 18px;
+  }
+  #claim-myth {
+    font-weight: 800; line-height: 1.08; letter-spacing: -.02em;
+    font-size: 96px; color: rgba(255,255,255,.88);
+  }
+  #claim-myth span {
+    background: linear-gradient(var(--warn), var(--warn)) no-repeat 0 56% / var(--strike, 0%) 10px;
+    -webkit-box-decoration-break: clone; box-decoration-break: clone;
+  }
+  #claim-truth {
+    font-weight: 900; line-height: .98; letter-spacing: -.035em; font-size: 130px;
+    background: linear-gradient(180deg, #ffffff 20%, #ffd36b 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    text-shadow: none; filter: drop-shadow(0 14px 40px rgba(0,0,0,.55));
+  }
+  #claim-gap { height: 74px; }
+
+  /* проблема */
+  .card {
+    border-radius: 36px; padding: 42px 48px;
+    background: linear-gradient(180deg, rgba(255,255,255,.075), rgba(255,255,255,.035));
+    border: 1px solid var(--stroke);
+    box-shadow: 0 30px 70px rgba(0,0,0,.45);
+    will-change: transform, opacity;
+  }
+  .card.warn {
+    background: linear-gradient(180deg, rgba(255,255,255,.075), rgba(255,255,255,.035));
+    border-color: var(--stroke);
+  }
+  .card-label {
+    font-size: 26px; font-weight: 700; letter-spacing: .17em; text-transform: uppercase;
+    color: var(--ink-3); margin-bottom: 18px;
+  }
+  .card.warn .card-label { color: rgba(255,105,97,.85); }
+  .card-text { font-size: 70px; font-weight: 700; line-height: 1.18; letter-spacing: -.015em; }
+  .card.warn .card-text { color: #fff; }
+  #arrow {
+    margin: 26px auto; width: 3px; height: 72px;
+    background: linear-gradient(180deg, var(--accent), var(--warn));
+    border-radius: 2px; transform-origin: top center; position: relative;
+  }
+  #arrow::after {
+    content: ""; position: absolute; left: 50%; bottom: -3px;
+    width: 18px; height: 18px; margin-left: -9px;
+    border-right: 3px solid var(--warn); border-bottom: 3px solid var(--warn);
+    transform: rotate(45deg); border-radius: 2px;
+  }
+
+  /* решение */
+  #steps-head {
+    font-size: 26px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--accent); margin-bottom: 38px;
+  }
+  .step { display: flex; align-items: flex-start; gap: 26px; margin-bottom: 30px; will-change: transform, opacity; }
+  .step-num {
+    flex: 0 0 72px; height: 72px; border-radius: 50%;
+    background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.14);
+    color: #fff; font-size: 34px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .step-text { font-size: 60px; font-weight: 700; line-height: 1.26; letter-spacing: -.01em; padding-top: 4px; }
+
+  #steps.big .step { margin-bottom: 52px; gap: 32px; }
+  #steps.big .step-num { flex: 0 0 92px; height: 92px; font-size: 44px; }
+
+  /* терминал */
+  #term {
+    margin-top: 18px; border-radius: 26px; overflow: hidden;
+    background: #0b0f14; border: 1px solid var(--stroke);
+    box-shadow: 0 40px 90px rgba(0,0,0,.6);
+    will-change: transform, opacity;
+  }
+  #term-bar {
+    height: 62px; display: flex; align-items: center; gap: 11px; padding: 0 26px;
+    background: rgba(255,255,255,.045); border-bottom: 1px solid rgba(255,255,255,.07);
+  }
+  .dot { width: 14px; height: 14px; border-radius: 50%; }
+  #term-title {
+    margin-left: 18px; font-size: 22px; font-weight: 600;
+    color: var(--ink-3); letter-spacing: .04em;
+  }
+  #term-body {
+    padding: 30px 34px 36px; font-family: "Mono", monospace;
+    font-size: 31px; line-height: 1.52; white-space: pre-wrap; word-break: break-word;
+    color: #e6edf3;
+  }
+  .tok-kw  { color: #ff7b72; font-weight: 700; }
+  .tok-str { color: #7ee787; }
+  .tok-num { color: #79c0ff; }
+  .tok-fn  { color: #ffa657; }
+  .tok-pun { color: rgba(230,237,243,.5); }
+  #caret {
+    display: inline-block; width: 15px; height: 34px; vertical-align: -5px;
+    background: var(--accent); margin-left: 3px;
+  }
+
+  /* главная мысль */
+  #take-label {
+    font-size: 26px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--accent); margin-bottom: 36px; text-align: center;
+  }
+  #take-text {
+    font-size: 108px; font-weight: 900; letter-spacing: -.03em; line-height: 1.08; text-align: center;
+    text-shadow: 0 16px 60px rgba(0,0,0,.55);
+  }
+  #take-text .w { display: inline-block; will-change: transform, opacity; }
+  #take-rule {
+    margin: 44px auto 0; height: 6px; width: 260px; border-radius: 3px;
+    background: linear-gradient(90deg, var(--accent), rgba(255,197,51,0));
+    transform-origin: left center;
+  }
+
+  /* маскот: слева внизу, срезан нижним краем кадра (позы нарезаны по пояс). Тёмная одежда на тёмном
+     фоне теряется, поэтому под ним тёплое пятно в цвет бренда. */
+  #mascot-wrap { position: absolute; left: 0; bottom: 0; width: 520px; height: 520px; pointer-events: none; }
+  #mascot-glow {
+    position: absolute; left: -90px; bottom: -120px; width: 760px; height: 760px;
+    background: radial-gradient(circle closest-side, rgba(255,197,51,.42) 0%, rgba(255,150,30,.16) 55%, transparent 100%);
+  }
+  #mascot { position: absolute; left: 14px; bottom: 0; height: 430px; width: 430px; transform-origin: 50% 100%; will-change: transform; }
+  #mascot img { position: absolute; left: 0; bottom: 0; height: 430px; width: auto; max-width: 520px; opacity: 0; }
+
+  /* призыв */
+  #cta-name {
+    font-size: 130px; font-weight: 900; letter-spacing: -.035em; text-align: center; line-height: 1.02;
+    text-shadow: 0 16px 60px rgba(0,0,0,.55);
+  }
+  #cta-sub {
+    margin-top: 28px; text-align: center; font-size: 48px; font-weight: 500; color: var(--ink-2);
+  }
+  #cta-pill {
+    margin: 52px auto 0; padding: 26px 52px; border-radius: 999px;
+    background: #fff; color: #000;
+    font-size: 40px; font-weight: 700; letter-spacing: -.01em;
+    display: inline-flex; align-items: center; gap: 16px;
+    box-shadow: 0 24px 60px rgba(0,0,0,.4);
+    will-change: transform;
+  }
+  #cta-wrap { display: flex; justify-content: center; }
+
+  /* субтитры */
+  #caption {
+    position: absolute; left: 90px; right: 90px; top: 1310px;
+    text-align: center; will-change: transform, opacity;
+  }
+  #caption-inner {
+    display: inline-block; padding: 8px 0;
+    font-size: 74px; font-weight: 700; line-height: 1.16; letter-spacing: -.025em;
+    text-shadow: 0 6px 30px rgba(0,0,0,.7);
+  }
+  #caption-inner .dim { color: rgba(255,255,255,.34); }
+  #caption-inner .key { color: var(--accent); }
+
+  /* схема причин и следствий вместо двух карточек */
+  #flow { display: none; flex-direction: column; }
+  .fnode {
+    display: flex; align-items: center; gap: 36px; padding: 26px 40px; border-radius: 36px;
+    background: linear-gradient(180deg, rgba(255,255,255,.075), rgba(255,255,255,.035));
+    border: 1px solid var(--stroke); box-shadow: 0 30px 70px rgba(0,0,0,.45);
+    will-change: transform, opacity;
+  }
+  .fnode .ico {
+    flex: 0 0 112px; height: 112px; border-radius: 30px; display: flex; align-items: center; justify-content: center;
+    background: rgba(255,197,51,.12); color: var(--accent); border: 1px solid rgba(255,197,51,.3);
+  }
+  .fnode .ico svg { width: 64px; height: 64px; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+  .fnode.last { border-color: rgba(255,105,97,.45); }
+  .fnode.last .ico { background: rgba(255,105,97,.14); color: var(--warn); border-color: rgba(255,105,97,.45); }
+  .flabel { font-size: 66px; font-weight: 800; letter-spacing: -.02em; line-height: 1.1; min-width: 0; }
+  .fcon { position: relative; height: 64px; width: 6px; margin-left: 93px; }
+  .fcon .line { position: absolute; inset: 0; border-radius: 3px; transform-origin: top center;
+    background: linear-gradient(180deg, var(--accent), var(--warn)); transform: scaleY(0); }
+  .fcon .dot { position: absolute; left: -6px; width: 18px; height: 18px; border-radius: 50%; opacity: 0;
+    background: #fff; box-shadow: 0 0 18px var(--accent); }
+
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="wash"></div>
+  <div id="vignette"></div>
+
+  <div id="progress-track"><div id="progress-fill"></div></div>
+  <div id="brand"><div id="brand-dot"></div><div id="brand-name"></div></div>
+
+  <div class="scene" id="scene-hook">
+    <div id="hook-big"></div>
+    <div id="hook-small"></div>
+    <div id="hook-claim" style="display:none">
+      <div class="claim-tag" id="tag-myth">Все думают</div>
+      <div id="claim-myth"><span id="claim-myth-text"></span></div>
+      <div id="claim-gap"></div>
+      <div class="claim-tag" id="tag-truth" style="color:var(--accent)">На деле</div>
+      <div id="claim-truth"></div>
+    </div>
+  </div>
+
+  <div class="scene" id="scene-problem">
+    <div class="card" id="card-before">
+      <div class="card-label">Ошибка</div>
+      <div class="card-text" id="before-text"></div>
+    </div>
+    <div id="arrow"></div>
+    <div class="card warn" id="card-after">
+      <div class="card-label">Итог</div>
+      <div class="card-text" id="after-text"></div>
+    </div>
+    <div id="flow"></div>
+  </div>
+
+  <div class="scene" id="scene-solution">
+    <div id="steps-head">Что делать</div>
+    <div id="steps"></div>
+    <div id="term">
+      <div id="term-bar">
+        <div class="dot" style="background:#ff5f57"></div>
+        <div class="dot" style="background:#febc2e"></div>
+        <div class="dot" style="background:#28c840"></div>
+        <div id="term-title"></div>
+      </div>
+      <div id="term-body"></div>
+    </div>
+  </div>
+
+  <div class="scene" id="scene-takeaway">
+    <div id="take-label">Запомни</div>
+    <div id="take-text"></div>
+    <div id="take-rule"></div>
+  </div>
+
+  <div class="scene" id="scene-cta">
+    <div id="cta-name"></div>
+    <div id="cta-sub"></div>
+    <div id="cta-wrap"><div id="cta-pill"></div></div>
+  </div>
+
+  <div id="mascot-wrap"><div id="mascot-glow"></div><div id="mascot"></div></div>
+
+  <div id="caption"><span id="caption-inner"></span></div>
+</div>
+
+<script>
+const C = __CONFIG__;
+
+/* ---------- утилиты анимации ---------- */
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+const outQuint = x => 1 - Math.pow(1 - x, 5);
+const outBack  = x => 1 - Math.pow(1 - x, 4); /* мягкое торможение без «подпрыгивания» */
+const inOut    = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+
+/** прогресс 0..1 анимации, стартующей в start и длящейся dur */
+function at(t, start, dur, ease) {
+  const p = clamp((t - start) / dur, 0, 1);
+  return (ease || outQuint)(p);
+}
+const px = v => v.toFixed(2) + "px";
+
+/** появление: сдвиг снизу + прозрачность + лёгкий масштаб */
+function rise(el, p, dy) {
+  dy = dy === undefined ? 34 : dy;
+  el.style.opacity = p;
+  el.style.transform = "translateY(" + px((1 - p) * dy) + ") scale(" + (0.985 + 0.015 * p).toFixed(4) + ")";
+}
+
+/* ---------- подгонка текста под ширину блока ---------- */
+function fit(el, maxSize, minSize, maxHeight) {
+  let size = maxSize;
+  el.style.fontSize = size + "px";
+  const w = el.clientWidth || 936;
+  while (size > minSize && (el.scrollWidth > w + 1 || (maxHeight && el.scrollHeight > maxHeight))) {
+    size -= 4;
+    el.style.fontSize = size + "px";
+  }
+}
+
+/* ---------- подсветка цифр в крупном заголовке ---------- */
+function markNumbers(s) {
+  return esc(s).replace(/([0-9][0-9  .,]*\s*(?:%|₽|\$|€)?)/g, '<span class="num">$1</span>');
+}
+function esc(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/* ---------- простая подсветка кода ---------- */
+function highlight(code) {
+  const out = [];
+  const kw = "FROM|RUN|COPY|CMD|ENTRYPOINT|WORKDIR|ENV|EXPOSE|AS|SELECT|WHERE|GROUP BY|ORDER BY|JOIN|INSERT|UPDATE|DELETE|CREATE|INDEX|ON|LIMIT|docker|kubectl|helm|git|npm|pip|curl|export|sudo";
+  const re = new RegExp("(\\b(?:" + kw + ")\\b)|(\"[^\"]*\"|'[^']*'|`[^`]*`)|(\\b\\d+(?:\\.\\d+)?[a-z%]*\\b)|([A-Za-z_][\\w.]*)(\\s*\\()|([{}()\\[\\],;:|><=+*\\/-])", "g");
+  let last = 0, m;
+  while ((m = re.exec(code)) !== null) {
+    out.push(esc(code.slice(last, m.index)));
+    if (m[1]) out.push('<span class="tok-kw">' + esc(m[1]) + "</span>");
+    else if (m[2]) out.push('<span class="tok-str">' + esc(m[2]) + "</span>");
+    else if (m[3]) out.push('<span class="tok-num">' + esc(m[3]) + "</span>");
+    else if (m[4]) out.push('<span class="tok-fn">' + esc(m[4]) + "</span>" + esc(m[5]));
+    else if (m[6]) out.push('<span class="tok-pun">' + esc(m[6]) + "</span>");
+    last = re.lastIndex;
+  }
+  out.push(esc(code.slice(last)));
+  return out.join("");
+}
+
+/* ---------- сборка статической части ---------- */
+const S = C.scenes;
+const el = id => document.getElementById(id);
+
+el("brand-name").textContent = C.brand.name;
+
+el("hook-big").innerHTML = markNumbers(C.hook.big);
+el("hook-small").textContent = C.hook.small || "";
+const isClaim = C.hook.layout === "claim";
+if (isClaim) {
+  el("hook-big").style.display = "none";
+  el("hook-small").style.display = "none";
+  el("hook-claim").style.display = "block";
+  el("claim-myth-text").textContent = C.hook.myth;
+  el("claim-truth").textContent = C.hook.truth;
+}
+
+el("before-text").textContent = C.problem.before || "";
+el("after-text").textContent = C.problem.after || "";
+/* пустую карточку показывать нельзя — на экране повиснет стеклянный прямоугольник с одной подписью */
+if (!C.problem.before) el("card-before").style.display = "none";
+if (!C.problem.after) el("card-after").style.display = "none";
+if (!C.problem.before || !C.problem.after) el("arrow").style.display = "none";
+
+/* схема причин и следствий: иконки нарисованы здесь же, векторные, без картинок */
+const ICONS = {
+  server: '<rect x="8" y="9" width="32" height="12" rx="3"/><rect x="8" y="27" width="32" height="12" rx="3"/><path d="M14 15h.01M14 33h.01"/>',
+  db: '<ellipse cx="24" cy="12" rx="14" ry="6"/><path d="M10 12v24c0 3.3 6.3 6 14 6s14-2.7 14-6V12M10 24c0 3.3 6.3 6 14 6s14-2.7 14-6"/>',
+  user: '<circle cx="24" cy="16" r="7"/><path d="M9 40c1-8 7-12 15-12s14 4 15 12"/>',
+  queue: '<rect x="5" y="16" width="10" height="16" rx="2"/><rect x="19" y="16" width="10" height="16" rx="2"/><rect x="33" y="16" width="10" height="16" rx="2"/>',
+  cloud: '<path d="M14 36a8 8 0 0 1-1-16 11 11 0 0 1 21-2 9 9 0 0 1 1 18z"/>',
+  code: '<path d="M17 14L7 24l10 10M31 14l10 10-10 10M27 10l-6 28"/>',
+  clock: '<circle cx="24" cy="24" r="16"/><path d="M24 14v10l7 4"/>',
+  money: '<circle cx="24" cy="24" r="16"/><path d="M29 18c-1-2-3-3-5-3-3 0-5 1.5-5 4s2 3 5 4 5 1.5 5 4-2 4-5 4c-2 0-4-1-5-3M24 11v4M24 33v4"/>',
+  shield: '<path d="M24 6l15 5v11c0 9-6 16-15 20C15 38 9 31 9 22V11z"/>',
+  bolt: '<path d="M27 5L10 27h12l-3 16 19-23H26z"/>',
+  box: '<path d="M24 6l16 8v20l-16 8-16-8V14zM8 14l16 8 16-8M24 22v20"/>',
+};
+const flowEls = [], conEls = [];
+const hasFlow = Array.isArray(C.flow) && C.flow.length >= 3;
+if (hasFlow) {
+  ["card-before", "arrow", "card-after"].forEach(id => el(id).style.display = "none");
+  const box = el("flow");
+  box.style.display = "flex";
+  C.flow.forEach((n, i) => {
+    if (i > 0) {
+      const c = document.createElement("div");
+      c.className = "fcon";
+      c.innerHTML = '<div class="line"></div><div class="dot"></div>';
+      box.appendChild(c);
+      conEls.push({ line: c.firstChild, dot: c.lastChild });
+    }
+    const d = document.createElement("div");
+    d.className = "fnode" + (i === C.flow.length - 1 ? " last" : "");
+    d.innerHTML = '<div class="ico"><svg viewBox="0 0 48 48">' + (ICONS[n.icon] || ICONS.box) + '</svg></div><div class="flabel">' + esc(n.label) + "</div>";
+    box.appendChild(d);
+    flowEls.push(d);
+  });
+}
+
+const stepsBox = el("steps");
+C.steps.forEach((s, i) => {
+  const row = document.createElement("div");
+  row.className = "step";
+  row.innerHTML = '<div class="step-num">' + (i + 1) + '</div><div class="step-text">' + esc(s) + "</div>";
+  stepsBox.appendChild(row);
+});
+const stepEls = Array.from(document.querySelectorAll(".step"));
+
+const hasCode = !!(C.code && C.code.text && C.code.text.trim());
+if (hasCode) {
+  el("term-title").textContent = C.code.title || "terminal";
+  el("term-body").dataset.code = C.code.text;
+} else {
+  el("term").style.display = "none";
+}
+
+const takeWords = (C.takeaway || "").split(/\s+/).filter(Boolean);
+el("take-text").innerHTML = takeWords.map(w => '<span class="w">' + esc(w) + "</span>").join(" ");
+const takeEls = Array.from(document.querySelectorAll("#take-text .w"));
+
+el("cta-name").textContent = C.cta.title || C.brand.name;
+el("cta-sub").textContent = C.cta.sub || "";
+el("cta-pill").textContent = C.cta.pill || "";
+
+/* фоновые пятна */
+const blobs = [
+  { c: "rgba(255,197,51,.20)", s: 1100, x: -80, y: 120,  ax: 70,  ay: 110, sp: .07 },
+  { c: "rgba(255,140,30,.12)", s: 1000, x: 420, y: 1120, ax: -90, ay: -70, sp: .05 },
+  { c: "rgba(56,189,248,.13)", s: 900,  x: 180, y: 700,  ax: 60,  ay: -90, sp: .09 },
+];
+const blobEls = blobs.map(b => {
+  const d = document.createElement("div");
+  d.className = "blob";
+  d.style.cssText = "width:" + b.s + "px;height:" + b.s + "px;background:radial-gradient(circle closest-side,"
+    + b.c + " 0%, transparent 72%)";
+  el("wash").appendChild(d);
+  return d;
+});
+
+/* «дождь из символов» вместо пустого фона, когда стока нет (config.ambient) */
+const rain = [];
+const RAIN_ROWS = 30, RAIN_LINE = 38;
+if (C.ambient) {
+  /* детерминированный генератор: кадры рендерятся параллельно в разных вкладках и должны совпадать */
+  let seed = 20261105;
+  const rnd = () => {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+  const glyphs = "01{}[]<>/=+-*#$%&;:ABCDEF";
+  const amb = document.createElement("div");
+  amb.id = "ambient";
+  el("wash").appendChild(amb);
+  for (let i = 0; i < 15; i++) {
+    const col = document.createElement("div");
+    col.className = "rain";
+    let s = "";
+    for (let k = 0; k < RAIN_ROWS; k++) s += glyphs[Math.floor(rnd() * glyphs.length)] + "\n";
+    col.textContent = s;
+    const warm = rnd() < .25;
+    const alpha = (0.13 + rnd() * 0.12).toFixed(3);
+    col.style.left = px(i * 74 + 12 + rnd() * 20);
+    col.style.color = (warm ? "rgba(255,197,51," : "rgba(110,220,210,") + alpha + ")";
+    amb.appendChild(col);
+    rain.push({ el: col, speed: 50 + rnd() * 90, phase: rnd() * 2400 });
+  }
+}
+
+/* подгонка размеров — один раз, контент дальше не меняется */
+function layout() {
+  if (isClaim) {
+    fit(el("claim-myth"), 108, 48, 360);
+    fit(el("claim-truth"), 168, 62, 500);
+  } else {
+    fit(el("hook-big"), 290, 74, 640);
+    fit(el("hook-small"), 58, 34, 240);
+  }
+  document.querySelectorAll(".card-text").forEach(e => fit(e, 70, 38, 260));
+  document.querySelectorAll(".flabel").forEach(e => fit(e, 66, 38, 126));
+  /* без терминала шаги — единственное содержимое сцены: делаем их крупными, иначе экран наполовину пуст */
+  if (!hasCode) el("steps").classList.add("big");
+  document.querySelectorAll(".step-text").forEach(e => fit(e, hasCode ? 60 : 82, 36, hasCode ? 170 : 230));
+  fit(el("take-text"), 108, 58, 700);
+  fit(el("cta-name"), 130, 64, 320);
+  if (hasCode) {
+    /* код не переносим: строка, разорванная посреди выражения, читается как ошибка.
+       Уменьшаем кегль, пока самая длинная строка не влезет по ширине. */
+    const body = el("term-body");
+    const code = body.dataset.code;
+    body.innerHTML = highlight(code);
+    body.style.whiteSpace = "pre";
+    /* короткий фрагмент показываем крупно: на телефоне код читают, а не разглядывают */
+    const lines = code.split("\n").length;
+    let size = lines <= 5 ? 40 : lines <= 7 ? 34 : 30;
+    body.style.fontSize = size + "px";
+    while (size > 22 && (body.scrollWidth > body.clientWidth + 1 || body.scrollHeight > (lines <= 5 ? 400 : 330))) {
+      size -= 1;
+      body.style.fontSize = size + "px";
+    }
+    if (body.scrollWidth > body.clientWidth + 1) body.style.whiteSpace = "pre-wrap";
+  }
+}
+
+/* ---------- субтитры ---------- */
+const chunks = C.chunks || [];
+
+/* ---------- маскот ---------- */
+const M = C.mascot;
+const mEl = el("mascot");
+const allWords = [];
+chunks.forEach(c => c.w.forEach(w => allWords.push(w)));
+const poseEls = {};
+if (M) {
+  Object.keys(M.poses).forEach(id => {
+    const im = document.createElement("img");
+    im.src = M.poses[id];
+    mEl.appendChild(im);
+    poseEls[id] = im;
+  });
+} else {
+  el("mascot-wrap").style.display = "none";
+}
+
+/* ---------- кадр ---------- */
+function seek(t) {
+  /* фон */
+  blobEls.forEach((d, i) => {
+    const b = blobs[i];
+    const k = Math.sin(t * b.sp * 2 * Math.PI / 6);
+    d.style.transform = "translate(" + px(b.x + b.ax * k) + "," + px(b.y + b.ay * k) + ")";
+  });
+
+  const rainSpan = 1920 + RAIN_ROWS * RAIN_LINE;
+  rain.forEach(r => {
+    r.el.style.transform = "translateY(" + px(((t * r.speed + r.phase) % rainSpan) - RAIN_ROWS * RAIN_LINE) + ")";
+  });
+
+  /* прогресс */
+  el("progress-fill").style.width = px(1080 * clamp(t / C.duration, 0, 1));
+
+  /* шапка: въезжает в начале */
+  const bp = at(t, .15, .7);
+  const brand = el("brand");
+  brand.style.opacity = bp;
+  brand.style.transform = "translateY(" + px((1 - bp) * -16) + ")";
+
+  /* какая сцена активна */
+  const names = ["hook", "problem", "solution", "takeaway", "cta"];
+  names.forEach(name => {
+    const [s0, s1] = S[name];
+    const node = el("scene-" + name);
+    if (s1 - s0 < .05) { node.style.display = "none"; return; }
+    /* перекрытие держим коротким: при длинном обе сцены висят полупрозрачными и наслаиваются */
+    const enter = at(t, s0 - .1, .45);
+    const exit = 1 - at(t, s1 - .22, .22, inOut);
+    const vis = t >= s0 - .55 && t <= s1 + .25;
+    node.style.display = vis ? "flex" : "none";
+    if (!vis) return;
+    node.style.opacity = (enter * exit).toFixed(3);
+    node.style.transform = "translateY(" + px((1 - enter) * 26 - (1 - exit) * 22) + ")";
+  });
+
+  /* хук */
+  if (isClaim && t <= S.hook[1] + .5) {
+    const h0 = S.hook[0];
+    rise(el("tag-myth"), at(t, h0 + .05, .4), 16);
+    rise(el("claim-myth"), at(t, h0 + .15, .6), 40);
+    /* зачёркивание: линия растёт слева направо, миф после этого тускнеет */
+    const strike = at(t, h0 + .95, .4, inOut);
+    el("claim-myth").style.setProperty("--strike", (strike * 100).toFixed(1) + "%");
+    el("claim-myth").style.color = "rgba(255,255,255," + (0.88 - 0.5 * strike).toFixed(3) + ")";
+    /* правда: «удар» после зачёркивания */
+    const tp = at(t, h0 + 1.45, .55);
+    rise(el("tag-truth"), at(t, h0 + 1.35, .4), 16);
+    const truth = el("claim-truth");
+    truth.style.opacity = tp;
+    truth.style.transform = "translateY(" + px((1 - tp) * 50) + ") scale(" + (1.06 - .06 * at(t, h0 + 1.45, .5, outBack)).toFixed(4) + ")";
+  } else if (t <= S.hook[1] + .5) {
+    const h0 = S.hook[0];
+    const p = at(t, h0 + .1, .75);
+    const big = el("hook-big");
+    big.style.clipPath = "inset(0 0 " + ((1 - p) * 100).toFixed(1) + "% 0)";
+    rise(big, p, 46);
+    /* «удар»: цифра влетает чуть крупнее и садится на место — первые полсекунды решают, пролистнут или нет */
+    const punch = at(t, h0 + .05, .5, outBack);
+    big.style.transform += " scale(" + (1.05 - .05 * punch).toFixed(4) + ")";
+    rise(el("hook-small"), at(t, h0 + .45, .7), 26);
+  }
+
+  /* проблема */
+  if (hasFlow && t >= S.problem[0] - .6 && t <= S.problem[1] + .5) {
+    const p0 = S.problem[0];
+    const n = flowEls.length;
+    /* узлы выезжают по очереди, между ними рисуется линия, по готовой линии бежит точка */
+    const gap = Math.min(1.25, Math.max(.5, (S.problem[1] - p0 - .9) / n));
+    flowEls.forEach((d, i) => {
+      const st = p0 + .1 + i * gap;
+      const a = clamp(at(t, st, .55, outBack), 0, 1);
+      d.style.opacity = a;
+      d.style.transform = "translateX(" + px((1 - a) * (i % 2 ? 70 : -70)) + ") scale(" + (.96 + .04 * a).toFixed(3) + ")";
+    });
+    conEls.forEach((c, i) => {
+      const st = p0 + .1 + i * gap + .4;
+      const p = at(t, st, .4, inOut);
+      c.line.style.transform = "scaleY(" + p.toFixed(3) + ")";
+      c.dot.style.opacity = p >= 1 ? 1 : 0;
+      c.dot.style.top = px((((t - st) * 1.1) % 1) * 46);
+    });
+  } else if (t >= S.problem[0] - .6 && t <= S.problem[1] + .5) {
+    const p0 = S.problem[0];
+    const a = at(t, p0 + .1, .65, outBack);
+    const before = el("card-before");
+    before.style.opacity = clamp(a, 0, 1);
+    before.style.transform = "translateX(" + px((1 - a) * -70) + ")";
+
+    const arrowP = at(t, p0 + .55, .45);
+    el("arrow").style.transform = "scaleY(" + arrowP.toFixed(3) + ")";
+    el("arrow").style.opacity = arrowP;
+
+    const b = at(t, p0 + .75, .65, outBack);
+    const after = el("card-after");
+    after.style.opacity = clamp(b, 0, 1);
+    after.style.transform = "translateX(" + px((1 - b) * 70) + ")";
+  }
+
+  /* решение */
+  if (t >= S.solution[0] - .6 && t <= S.solution[1] + .5) {
+    const s0 = S.solution[0];
+    const span = S.solution[1] - s0;
+    rise(el("steps-head"), at(t, s0 + .1, .5), 18);
+
+    /* шаги появляются в момент, когда диктор начинает о них говорить; нет таймкодов — раскладываем ровно */
+    const stepsSpan = hasCode ? span * .5 : span * .72;
+    const gap = stepEls.length ? stepsSpan / (stepEls.length + .6) : 0;
+    /* при нуле шагов stepTimes[-1] даёт NaN, и терминал показывался пустым: проверяем явно */
+    const voiced = stepEls.length > 0 && C.stepTimes && C.stepTimes.length === stepEls.length;
+    stepEls.forEach((row, i) => {
+      const st = voiced ? C.stepTimes[i] - .08 : s0 + .35 + i * gap;
+      const nxt = i + 1 < stepEls.length ? (voiced ? C.stepTimes[i + 1] - .08 : s0 + .35 + (i + 1) * gap) : 1e9;
+      /* активный шаг яркий, прошедшие приглушаются — взгляд идёт за голосом */
+      const p = at(t, st, .5);
+      const dim = 1 - .62 * at(t, nxt, .4);
+      row.style.opacity = (p * dim).toFixed(3);
+      row.style.transform = "translateY(" + px((1 - p) * 30) + ")";
+    });
+
+    if (hasCode) {
+      const lastStep = voiced ? C.stepTimes[C.stepTimes.length - 1] + .9 : 0;
+      const termStart = Math.min(Math.max(s0 + span * .5, lastStep), S.solution[1] - 1.5);
+      const tp = at(t, termStart, .6);
+      const term = el("term");
+      term.style.opacity = tp;
+      term.style.transform = "translateY(" + px((1 - tp) * 44) + ")";
+
+      /* печать кода */
+      const body = el("term-body");
+      const code = body.dataset.code;
+      const typeDur = Math.min(2.6, (S.solution[1] - termStart) * .6);
+      const q = clamp((t - termStart - .25) / typeDur, 0, 1);
+      const n = Math.round(code.length * q);
+      const caret = q < 1 && q > 0 ? '<span id="caret"></span>' : "";
+      const key = n + "|" + (caret ? 1 : 0);
+      if (body.dataset.key !== key) {
+        body.dataset.key = key;
+        body.innerHTML = highlight(code.slice(0, n)) + caret;
+      }
+    }
+  }
+
+  /* главная мысль: слова вылетают по одному */
+  if (takeEls.length && t >= S.takeaway[0] - .6 && t <= S.takeaway[1] + .5) {
+    const k0 = S.takeaway[0];
+    rise(el("take-label"), at(t, k0 + .05, .4), 16);
+    const per = Math.min(.16, Math.max(.05, (S.takeaway[1] - k0 - 1.2) / takeEls.length));
+    takeEls.forEach((w, i) => {
+      const p = at(t, k0 + .2 + i * per, .45, outBack);
+      w.style.opacity = clamp(p, 0, 1);
+      w.style.transform = "translateY(" + px((1 - p) * 40) + ") scale(" + (0.9 + 0.1 * p).toFixed(4) + ")";
+    });
+    el("take-rule").style.transform = "scaleX(" + at(t, k0 + .2 + takeEls.length * per, .5).toFixed(3) + ")";
+  }
+
+  /* призыв */
+  if (t >= S.cta[0] - .6) {
+    const c0 = S.cta[0];
+    const p = at(t, c0 + .1, .7);
+    const name = el("cta-name");
+    name.style.clipPath = "inset(0 0 " + ((1 - p) * 100).toFixed(1) + "% 0)";
+    rise(name, p, 38);
+    rise(el("cta-sub"), at(t, c0 + .4, .6), 22);
+
+    const pp = at(t, c0 + .6, .55, outBack);
+    const pulse = 1 + .028 * Math.sin((t - c0) * 3.4);
+    const pill = el("cta-pill");
+    pill.style.opacity = clamp(pp, 0, 1);
+    pill.style.transform = "scale(" + (pp * pulse).toFixed(4) + ")";
+  }
+
+  /* маскот «рассказывает»: на каждое слово — рывок, на каждой новой фразе — новая эмоция (поза),
+     на смене сцены — прыжок. Картинка не оживает, но постоянно «играет», как у ютуб-персонажей. */
+  if (M) {
+    const enter = at(t, .45, .7, outBack);
+    let k = -1;
+    for (let i = 0; i < allWords.length; i++) { if (t >= allWords[i].s) k = i; else break; }
+    let talking = false, pulse = 0, dir = 1;
+    if (k >= 0) {
+      const w = allWords[k], age = t - w.s;
+      talking = t < (w.e || w.s + .3) + .04;
+      pulse = Math.max(0, 1 - age / .2);
+      dir = k % 2 ? 1 : -1;
+    }
+    let hop = 0;
+    ["problem", "solution", "takeaway", "cta"].forEach(n => {
+      const a = t - S[n][0];
+      if (S[n][1] - S[n][0] > .05 && a >= 0 && a < .4) hop = Math.max(hop, Math.sin(Math.PI * a / .4) * 40);
+    });
+
+    /* текущая поза и «удар» в момент её смены */
+    let cur = M.timeline[0], since = 99;
+    for (const ev of M.timeline) if (t >= ev[0]) { cur = ev; since = t - ev[0]; }
+    Object.keys(poseEls).forEach(id => { poseEls[id].style.opacity = id === cur[1] ? 1 : 0; });
+    const pop = Math.max(0, 1 - since / .26);
+
+    const bob = Math.sin(t * 2.6) * (talking ? 3 : 7);
+    const y = (1 - enter) * 520 - hop - pulse * 18 + bob;
+    const rot = dir * pulse * 4.5 + dir * pop * 3 + Math.sin(t * 1.7) * 1.2;
+    const sc2 = 1 + .055 * pulse + .09 * pop;
+    el("mascot-wrap").style.opacity = clamp(enter * 1.4, 0, 1);
+    mEl.style.transform = "translateY(" + px(y) + ") rotate(" + rot.toFixed(2) + "deg) scale(" + sc2.toFixed(4) + ")";
+  }
+
+  /* субтитры */
+  const cap = el("caption");
+  const inner = el("caption-inner");
+  let cur = -1;
+  for (let i = 0; i < chunks.length; i++) {
+    if (t >= chunks[i].s && t < chunks[i].e) { cur = i; break; }
+  }
+  if (cur < 0) {
+    cap.style.opacity = 0;
+  } else {
+    const ch = chunks[cur];
+    let active = 0;
+    for (let i = 0; i < ch.w.length; i++) if (t >= ch.w[i].s) active = i;
+    const key = cur + ":" + active;
+    if (inner.dataset.key !== key) {
+      inner.dataset.key = key;
+      inner.innerHTML = ch.w
+        .map((w, i) => (i > active ? '<span class="dim">' + esc(w.t) + "</span>"
+          : w.k ? '<span class="key">' + esc(w.t) + "</span>" : esc(w.t)))
+        .join(" ");
+    }
+    const pop = at(t, ch.s, .22);
+    cap.style.opacity = clamp(at(t, ch.s, .12) * (1 - at(t, ch.e - .1, .1)), 0, 1);
+    cap.style.transform = "translateY(" + px((1 - pop) * 14) + ")";
+  }
+}
+
+window.seek = seek;
+window.layoutDone = false;
+document.fonts.ready.then(() => { layout(); seek(0); window.layoutDone = true; });
+</script>
+</body>
+</html>

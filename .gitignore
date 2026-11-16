@@ -1,0 +1,18 @@
+.env
+.venv/
+__pycache__/
+data/
+client_secret*.json
+.dev.vars
+.wrangler/
+node_modules/
+
+# личное: выгрузки статистики LinkedIn (имя, цифры), заметки автора с адресом сервера, метки Windows
+*.xlsx
+CLAUDE.md
+*:Zone.Identifier
+*.Zone.Identifier
+
+# инстансы команд: настройки и данные живут локально, в репозитории только шаблон
+/instances/*
+!/instances/_template/

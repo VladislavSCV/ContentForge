@@ -1,0 +1,66 @@
+# Профиль engineering: личный инженерный бренд (SRE, Kubernetes, AI в разработке, рынок и найм).
+# Это эталон поведения: что не задано в другом профиле, берётся отсюда (extends = "engineering").
+description = "Инженерный бренд: инфраструктура и SRE, AI в разработке, рынок и найм"
+sources_file = "assets/sources.txt"
+stock_fallback = ["server room", "programmer at night", "data center"]
+
+[flags]
+story_shorts = true     # формат Shorts «история с героем»
+claim_layout = true     # сцена «миф → правда»
+flow_layout = true      # сцена-схема из узлов
+rubrics = true          # рубрика первой строкой Telegram-поста
+code_warning = true     # предупреждать, что в посте нет кода
+code_scene = true       # терминал с кодом в ролике
+
+# Столпы бренда: порядок = порядок выбора тем; подпись идёт в источник темы.
+[pillars]
+market = "рынок и найм"
+ai = "AI в разработке"
+infra = "инфраструктура и SRE"
+
+[rubrics]
+infra = "🏗 Инфраструктура и SRE"
+ai = "🤖 AI в разработке"
+market = "💼 Рынок и найм"
+
+[pillar_patterns]
+ai = '\bai\b|\bllms?\b|vllm|copilot|cursor|claude|\bgpt|agentic|ai coding|vibe coding|machine learning|mlops|inference'
+
+# Словарь тем: вес и шаблон. Порядок важен: ключи t0, t1… связывают тему с поправками из learning.py,
+# поэтому не переставляй темы, которые уже собрали статистику; новые добавляй в конец.
+# id = "market" помечает тему про рынок и найм: по ней определяется столп market.
+[[themes]]
+label = "инциденты и надёжность"
+weight = 3
+pattern = 'post-?mortem|incident|outage|\bsre\b|\bslo\b|on-?call|reliability|rollback|root cause'
+
+[[themes]]
+label = "AI-инфраструктура"
+weight = 3
+pattern = 'vllm|inference|\bgpu|mlops|llmops|model serving|kserve|triton|kv.?cache|quantiz|training cluster'
+
+[[themes]]
+label = "Kubernetes и платформы"
+weight = 2
+pattern = 'kubernetes|\bk8s\b|platform engineering|\bhelm\b|argo ?cd|\bflux\b|gitops|karpenter|\beks\b|\bgke\b|cilium|ebpf|service mesh'
+
+[[themes]]
+label = "FinOps"
+weight = 2
+pattern = 'finops|cloud cost|cost optimi|cut(ting)? (our )?(cloud )?(bill|costs?)|spot instances?|rightsiz'
+
+[[themes]]
+label = "AI в процессе разработки"
+weight = 3
+pattern = 'code review|pull request|\bcopilot\b|ai coding|ai-generated|ai assistants?|lead time|cursor|claude code|vibe coding'
+
+[[themes]]
+label = "общий DevOps"
+weight = 1
+pattern = 'terraform|opentofu|docker|observability|prometheus|opentelemetry|postgres|latency|autoscal|ci/cd|devops'
+
+[[themes]]
+id = "market"
+label = "рынок и найм"
+weight = 3
+pattern = 'layoffs?|laid off|hiring (freeze|market)|job market|tech jobs?|salar(y|ies)|compensation|\boffers?\b|\binterview(s|ing)?\b|\bresume|\bcareers?\b|promotion|staff engineer|engineering manager|remote work|return to office|\brto\b|\bvisa\b|h-?1b|\bjunior'

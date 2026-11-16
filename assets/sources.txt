@@ -1,0 +1,28 @@
+# Ленты, из которых бот каждый день подбирает темы. По одной ссылке в строке, # — комментарий.
+# Адреса вписаны по памяти и не проверялись: нерабочая лента пропускается, в логе будет «лента недоступна».
+# Нужны инженерные разборы с цифрами, а не новости и анонсы.
+
+# разборы от инженерных команд
+https://netflixtechblog.com/feed
+https://blog.cloudflare.com/rss/
+https://github.blog/engineering/feed/
+https://slack.engineering/feed/
+https://stackoverflow.blog/engineering/feed/
+https://aws.amazon.com/blogs/containers/feed/
+
+# Kubernetes и платформы
+https://kubernetes.io/feed.xml
+https://www.cncf.io/feed/
+
+# AI-инфраструктура
+https://huggingface.co/blog/feed.xml
+
+# лучшее с Hacker News по ключевым словам (точки = порог оценки)
+https://hnrss.org/newest?q=kubernetes+OR+postmortem+OR+sre+OR+finops+OR+vllm&points=80
+
+# рынок, найм и карьера (столп бренда; проверено 2026-11-09: отвечают 200, у hnrss в описании очки и комментарии)
+https://newsletter.pragmaticengineer.com/feed
+https://hnrss.org/newest?q=layoffs+OR+hiring+OR+salaries+OR+%22job+market%22&points=100
+https://hnrss.org/newest?q=%22software+engineer%22+AND+%28layoffs+OR+interview+OR+salary+OR+remote%29&points=60
+https://stackoverflow.blog/feed/
+# Reddit-ленты как источник тем не берём: после первого запроса отдают 429; для Reddit есть команда /reddit

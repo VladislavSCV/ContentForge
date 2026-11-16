@@ -1,0 +1,18 @@
+# Ленты для профиля CONTENT_PROFILE=general (психология, наука, кризисы, общество).
+# Включение: CONTENT_PROFILE=general и SOURCES_FILE=assets/sources_general.txt. Адреса проверены 2026-11-06: отвечают 200.
+# По одной ссылке в строке, # — комментарий. Нерабочая лента пропускается, в логе будет «лента недоступна».
+
+# наука
+https://www.nature.com/nature.rss
+https://www.sciencedaily.com/rss/all.xml
+https://www.sciencenews.org/feed
+https://www.quantamagazine.org/feed/
+https://www.scientificamerican.com/platform/syndication/rss/
+https://feeds.bbci.co.uk/news/science_and_environment/rss.xml
+
+# психика и мозг
+https://neurosciencenews.com/feed/
+
+# объяснения и длинные разборы
+https://theconversation.com/global/articles.atom
+https://aeon.co/feed.rss
